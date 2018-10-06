@@ -1,0 +1,112 @@
+#!/bin/sh
+
+#
+# Copyright (C) 2018 Chin Huat Ang <chinhuat@gmail.com>
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+#
+
+#
+# This script runs on OpenWRT to check wifi client interface's internet
+# connectivity using ping. When there is no internet connectivity, it
+# reconfigure the client interface to join the next available AP.
+#
+# This script should be invoked using cron, e.g. the following cron
+# entry executes this script every minute:
+#
+#   * * * * * /path/to/ap-failover
+#
+# This script expects ap.txt to be located in the same directory, where
+# each line contains an entry for an AP using the following format: 
+#
+#   <BSSID> <ESSID> <ENCRYPTION> <KEY>
+#
+# For example:
+#
+#   00:11:22:33:44:55 AccessPoint psk2 secret
+#
+
+VERBOSE=0
+
+DEVICE=radio0
+CLIENT_IFACE=wlan0
+WIFI_IFACE=1
+
+LOG=/tmp/$(basename $0)
+AP_LIST=ap.txt
+PING_ADDRESS="8.8.8.8"
+
+touch ${LOG}.log
+
+ESSID=$(iwinfo $DEVICE info | grep ESSID | awk '{ print $3 }' | sed 's/"//g')
+
+CURRENT_AP_INDEX=$(grep -n $ESSID $AP_LIST | sed "s/:/ /" | awk '{ print $1 }' )
+
+if [ "$CURRENT_AP_INDEX" == "" ]; then
+	CURRENT_AP_INDEX=0
+else
+	CURRENT_PING_COUNT=$(head -$CURRENT_AP_INDEX $AP_LIST | tail -1 | awk '{ print $5 }')
+	CURRENT_PING_WAIT=$(head -$CURRENT_AP_INDEX $AP_LIST | tail -1 | awk '{ print $6 }')
+fi
+
+if [ "$CURRENT_PING_COUNT" == "" ]; then
+	CURRENT_PING_COUNT=5
+fi
+
+if [ "$CURRENT_PING_WAIT" == "" ]; then
+	CURRENT_PING_WAIT=5
+fi
+
+mv -f ${LOG}.${ESSID}.ping.log ${LOG}.${ESSID}.ping.old.log
+ping -c $CURRENT_PING_COUNT -I $CLIENT_IFACE -W $CURRENT_PING_WAIT $PING_ADDRESS 2>&1 1>${LOG}.${ESSID}.ping.log
+
+if [ $? -eq 0 ]; then
+	[ $VERBOSE -ne 0 ] && echo "$(date) $ESSID working" | tee -a ${LOG}.log
+	return
+fi
+
+
+NEXT_AP_INDEX=$(expr $CURRENT_AP_INDEX + 1)
+TOTAL_AP=$(wc -l < $AP_LIST)
+
+if [ $NEXT_AP_INDEX -gt $TOTAL_AP ]; then
+	NEXT_AP_INDEX=1
+fi
+
+NEXT_BSSID=$(head -$NEXT_AP_INDEX $AP_LIST | tail -1 | awk '{ print $1 }')
+NEXT_SSID=$(head -$NEXT_AP_INDEX $AP_LIST | tail -1 | awk '{ print $2 }')
+NEXT_ENCRYPTION=$(head -$NEXT_AP_INDEX $AP_LIST | tail -1 | awk '{ print $3 }')
+NEXT_KEY=$(head -$NEXT_AP_INDEX $AP_LIST | tail -1 | awk '{ print $4 }')
+
+echo "$(date) $ESSID not working, switching to $NEXT_SSID." | tee -a ${LOG}.log
+
+uci delete wireless.@wifi-iface[$WIFI_IFACE]
+uci add wireless wifi-iface
+uci set wireless.@wifi-iface[-1].mode=sta
+uci set wireless.@wifi-iface[-1].device=$DEVICE
+uci set wireless.@wifi-iface[-1].network=wwan
+uci set wireless.@wifi-iface[-1].bssid=$NEXT_BSSID
+uci set wireless.@wifi-iface[-1].ssid=$NEXT_SSID
+uci set wireless.@wifi-iface[-1].encryption=$NEXT_ENCRYPTION
+
+if [ $NEXT_ENCRYPTION == "psk2" ]; then
+	uci set wireless.@wifi-iface[-1].key=$NEXT_KEY
+else
+	uci set wireless.@wifi-iface[-1].key1=$NEXT_KEY
+	uci set wireless.@wifi-iface[-1].key=1
+fi
+
+uci commit wireless
+wifi reload
