@@ -31,11 +31,11 @@
 # This script expects ap.txt to be located in the same directory, where
 # each line contains an entry for an AP using the following format: 
 #
-#   <BSSID> <ESSID> <ENCRYPTION> <KEY>
+#   <BSSID> <ESSID> <ENCRYPTION> <KEY> <PING_COUNT> <PING_WAIT>
 #
 # For example:
 #
-#   00:11:22:33:44:55 AccessPoint psk2 secret
+#   00:11:22:33:44:55 AccessPoint psk2 secret 10 5
 #
 
 VERBOSE=0
