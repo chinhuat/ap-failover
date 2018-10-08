@@ -38,6 +38,7 @@
 #   00:11:22:33:44:55 AccessPoint psk2 secret 10 5
 #
 
+FORCE=0
 VERBOSE=0
 
 DEVICE=radio0
@@ -47,6 +48,8 @@ WIFI_IFACE=1
 LOG=/tmp/$(basename $0)
 AP_LIST=ap.txt
 PING_ADDRESS="8.8.8.8"
+
+[ $# -eq 1 -a "$1" == "--force" ] && FORCE=1
 
 touch ${LOG}.log
 
@@ -70,13 +73,16 @@ if [ "$CURRENT_PING_WAIT" == "" ]; then
 fi
 
 mv -f ${LOG}.${ESSID}.ping.log ${LOG}.${ESSID}.ping.old.log
-ping -c $CURRENT_PING_COUNT -I $CLIENT_IFACE -W $CURRENT_PING_WAIT $PING_ADDRESS 2>&1 1>${LOG}.${ESSID}.ping.log
 
-if [ $? -eq 0 ]; then
-	[ $VERBOSE -ne 0 ] && echo "$(date) $ESSID working" | tee -a ${LOG}.log
-	return
+if [ $FORCE -ne 1 ]; then
+
+	ping -c $CURRENT_PING_COUNT -I $CLIENT_IFACE -W $CURRENT_PING_WAIT $PING_ADDRESS 2>&1 1>${LOG}.${ESSID}.ping.log
+
+	if [ $? -eq 0 ]; then
+		[ $VERBOSE -ne 0 ] && echo "$(date) $ESSID working" | tee -a ${LOG}.log
+		return
+	fi
 fi
-
 
 NEXT_AP_INDEX=$(expr $CURRENT_AP_INDEX + 1)
 TOTAL_AP=$(wc -l < $AP_LIST)
@@ -90,7 +96,11 @@ NEXT_SSID=$(head -$NEXT_AP_INDEX $AP_LIST | tail -1 | awk '{ print $2 }')
 NEXT_ENCRYPTION=$(head -$NEXT_AP_INDEX $AP_LIST | tail -1 | awk '{ print $3 }')
 NEXT_KEY=$(head -$NEXT_AP_INDEX $AP_LIST | tail -1 | awk '{ print $4 }')
 
-echo "$(date) $ESSID not working, switching to $NEXT_SSID." | tee -a ${LOG}.log
+if [ $FORCE -ne 1 ]; then
+	echo "$(date) $ESSID not working, switching to $NEXT_SSID." | tee -a ${LOG}.log
+else
+	echo "$(date) $ESSID working, switching to $NEXT_SSID anyway." | tee -a ${LOG}.log
+fi
 
 uci delete wireless.@wifi-iface[$WIFI_IFACE]
 uci add wireless wifi-iface
