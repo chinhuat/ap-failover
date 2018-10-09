@@ -40,7 +40,9 @@
 
 FORCE=0
 VERBOSE=0
+TEST=0
 
+SWITCH=0
 DEVICE=radio0
 CLIENT_IFACE=wlan0
 WIFI_IFACE=1
@@ -49,7 +51,14 @@ LOG=/tmp/$(basename $0)
 AP_LIST=ap.txt
 PING_ADDRESS="8.8.8.8"
 
-[ $# -eq 1 -a "$1" == "--force" ] && FORCE=1
+while true; do
+	case $1 in
+		--force)	FORCE=1; shift;;
+		--verbose) 	VERBOSE=1; shift;;
+		--test)		TEST=1; shift;;
+		*) break;
+	esac
+done
 
 touch ${LOG}.log
 
@@ -74,14 +83,9 @@ fi
 
 mv -f ${LOG}.${ESSID}.ping.log ${LOG}.${ESSID}.ping.old.log
 
-if [ $FORCE -ne 1 ]; then
-
+if [ $FORCE -eq 0 ]; then
 	ping -c $CURRENT_PING_COUNT -I $CLIENT_IFACE -W $CURRENT_PING_WAIT $PING_ADDRESS 2>&1 1>${LOG}.${ESSID}.ping.log
-
-	if [ $? -eq 0 ]; then
-		[ $VERBOSE -ne 0 ] && echo "$(date) $ESSID working" | tee -a ${LOG}.log
-		return
-	fi
+	SWITCH=$?
 fi
 
 NEXT_AP_INDEX=$(expr $CURRENT_AP_INDEX + 1)
@@ -96,10 +100,22 @@ NEXT_SSID=$(head -$NEXT_AP_INDEX $AP_LIST | tail -1 | awk '{ print $2 }')
 NEXT_ENCRYPTION=$(head -$NEXT_AP_INDEX $AP_LIST | tail -1 | awk '{ print $3 }')
 NEXT_KEY=$(head -$NEXT_AP_INDEX $AP_LIST | tail -1 | awk '{ print $4 }')
 
-if [ $FORCE -ne 1 ]; then
-	echo "$(date) $ESSID not working, switching to $NEXT_SSID." | tee -a ${LOG}.log
+if [ $SWITCH -eq 0 ]; then
+
+	if [ $FORCE -eq 1 ]; then
+		echo "$(date) $ESSID working, switching to $NEXT_SSID anyway." | tee -a ${LOG}.log
+	else
+		[ $VERBOSE -ne 0 ] && echo "$(date) $ESSID working" | tee -a ${LOG}.log
+		return
+	fi
+
 else
-	echo "$(date) $ESSID working, switching to $NEXT_SSID anyway." | tee -a ${LOG}.log
+	if [ $TEST -eq 1 ]; then
+		echo "$(date) $ESSID not working, but not switching to $NEXT_SSID." | tee -a ${LOG}.log
+		return
+	else
+		echo "$(date) $ESSID not working, switching to $NEXT_SSID." | tee -a ${LOG}.log
+	fi
 fi
 
 uci delete wireless.@wifi-iface[$WIFI_IFACE]
